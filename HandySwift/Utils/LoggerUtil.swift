@@ -59,16 +59,10 @@ func logError(_ message: String, _ args: CVarArg...,
 
 func setGlobalLogLevel(_ level: DDLogLevel) {
     dynamicLogLevel = level
-    Storage.set(uint: level.rawValue, forKey: StorageConst.Value.globalUserLogLevel)
 }
 
 func getGlobalLogLevel() -> DDLogLevel {
     dynamicLogLevel
-}
-
-func getDefaultGlobalLogLevel() -> DDLogLevel {
-    let level = Storage.uint(forKey: StorageConst.Value.globalUserLogLevel)
-    return DDLogLevel(rawValue: level) ?? LoggerConst.logLevel
 }
 
 func restoreLogLevelToDefault() {
@@ -120,81 +114,5 @@ class MyLogFormatter: NSObject, DDLogFormatter {
         #else
             return "\(formattedDate) [\(logLevel)] \(logMessage.message)"
         #endif
-    }
-}
-
-// MARK: - UDPLogForwarder
-
-class UDPLogForwarder: DDAbstractLogger {
-    private let client: UDPSocketClient
-
-    init(client _client: UDPSocketClient) {
-        client = _client
-        super.init()
-    }
-
-    func generateTimeStampString(_ logMessage: DDLogMessage) -> String {
-        MyLogFormatter.standardDateFormatter().string(from: logMessage.timestamp)
-    }
-
-    func generateLogLevelString(_ logMessage: DDLogMessage) -> String {
-        switch logMessage.flag {
-        case .error: "error"
-        case .warning: "warning"
-        case .info: "info"
-        case .debug: "debug"
-        case .verbose: "verbose"
-        default: "unknown"
-        }
-    }
-
-    func generateForwardContentDict(_ content: Any) -> [String: Any] {
-        let deviceID = FCUUID.uuidForDevice() ?? ""
-        let sessionID = FCUUID.uuidForSession() ?? ""
-
-        return [
-            "platform": "iOS",
-            "version": IdentifierConst.LocalInfos.appLocalVersion ?? "0.0.0",
-            "device": DataModel.shared.deviceModel,
-            "username": DataModel.shared.username,
-            "text": content,
-            "dlogsreport": 1,
-            "deviceID": deviceID,
-            "sessionID": sessionID,
-        ]
-    }
-
-    func serializeForwardContentDict(_ contentDict: [String: Any]) -> String {
-        if let jsonData = try? JSONSerialization.data(withJSONObject: contentDict, options: .prettyPrinted),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            jsonString
-        } else {
-            "Error serializing JSON"
-        }
-    }
-
-    override func log(message d: DDLogMessage) {
-        guard let ivar = class_getInstanceVariable(object_getClass(self), "_logFormatter") else {
-            return
-        }
-        if let ivarFormatter = object_getIvar(self, ivar) as? DDLogFormatter,
-           /*
-               * MUST use ivar to visit internal property for swift not providing a "_${prop}" way to avoid calling .self
-               * Using "self." syntax to go through DDLog async queue will cause immediate deadlock
-               */
-           let formatted = ivarFormatter.format(message: d) {
-
-            let timeStamp = generateTimeStampString(d)
-            let level = generateLogLevelString(d)
-
-            client.sendString(String(format: LoggerConst.udpLogForwardFormat,
-                                     DeviceUtil.localIPAddress(),
-                                     timeStamp,
-                                     level,
-                                     serializeForwardContentDict(generateForwardContentDict(formatted))),
-
-                              toHost: RemoteConst.LogForwardAddress.ipAddress,
-                              onPort: UInt16(RemoteConst.LogForwardAddress.port))
-        }
     }
 }
